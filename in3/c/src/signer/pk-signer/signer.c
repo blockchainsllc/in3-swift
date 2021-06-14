@@ -74,9 +74,12 @@ static bool add_key(in3_t* c, bytes32_t pk) {
   address_t address;
   get_address(pk, address);
   in3_sign_account_ctx_t ctx = {0};
+  in3_req_t              r   = {0};
+  ctx.req                    = &r;
+  r.client                   = c;
 
   for (in3_plugin_t* p = c->plugins; p; p = p->next) {
-    if (p->acts & (PLGN_ACT_SIGN_ACCOUNT | PLGN_ACT_SIGN) && p->action_fn(p->data, PLGN_ACT_SIGN_ACCOUNT, &ctx) == IN3_OK && ctx.accounts_len) {
+    if ((p->acts & PLGN_ACT_SIGN_ACCOUNT) && (p->acts & PLGN_ACT_SIGN) && p->action_fn(p->data, PLGN_ACT_SIGN_ACCOUNT, &ctx) == IN3_OK && ctx.accounts_len) {
       bool is_same_address = memcmp(ctx.accounts, address, 20) == 0;
       _free(ctx.accounts);
       if (is_same_address) return false;
@@ -97,6 +100,19 @@ static in3_ret_t eth_sign_pk(void* data, in3_plugin_act_t action, void* action_c
       switch (ctx->type) {
         case SIGN_EC_RAW:
           return ec_sign_pk_raw(ctx->message.data, k->pk, ctx->signature.data);
+
+        case SIGN_EC_PREFIX: {
+          bytes32_t       hash;
+          struct SHA3_CTX kctx;
+          sha3_256_Init(&kctx);
+          const char* PREFIX = "\x19"
+                               "Ethereum Signed Message:\n";
+          sha3_Update(&kctx, (uint8_t*) PREFIX, strlen(PREFIX));
+          sha3_Update(&kctx, hash, sprintf((char*) hash, "%d", (int) ctx->message.len));
+          if (ctx->message.len) sha3_Update(&kctx, ctx->message.data, ctx->message.len);
+          keccak_Final(&kctx, hash);
+          return ec_sign_pk_raw(hash, k->pk, ctx->signature.data);
+        }
         case SIGN_EC_HASH:
           return ec_sign_pk_hash(ctx->message.data, ctx->message.len, k->pk, hasher_sha3k, ctx->signature.data);
         default:

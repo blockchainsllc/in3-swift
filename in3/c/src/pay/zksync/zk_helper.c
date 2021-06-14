@@ -86,8 +86,8 @@ void zksync_calculate_account(address_t creator, bytes32_t codehash, bytes32_t s
   uint8_t tmp[85];
   memset(tmp, 0, 85);
   memcpy(tmp, saltarg, 32);
-  memcpy(tmp + 32 + 12, pub_key_hash, 20);
-  keccak(bytes(tmp, 64), tmp + 21);
+  memcpy(tmp + 32, pub_key_hash, 20);
+  keccak(bytes(tmp, 52), tmp + 21);
   *tmp = 0xff;
   memcpy(tmp + 1, creator, 20);
   memcpy(tmp + 53, codehash, 32);
@@ -188,12 +188,17 @@ in3_ret_t zksync_get_sync_key(zksync_config_t* conf, in3_req_t* ctx, uint8_t* sy
   }
   uint8_t* account = NULL;
   bytes_t  signature;
-  char*    message = "\x19"
-                  "Ethereum Signed Message:\n68"
-                  "Access zkSync account.\n\nOnly sign this message for a trusted client!";
+  char*    message = "Access zkSync account.\n\nOnly sign this message for a trusted client!";
+  if (ctx->client->chain.chain_id != CHAIN_ID_MAINNET) {
+    d_token_t* res = NULL;
+    TRY(req_send_sub_request(ctx, "eth_chainId", "", NULL, &res, NULL))
+    char* tmp = alloca(strlen(message) + 30);
+    sprintf(tmp, "%s\nChain ID: %d.", message, (int) d_int(res));
+    message = tmp;
+  }
   TRY(zksync_get_account(conf, ctx, &account))
   assert(account);
-  TRY(req_require_signature(ctx, SIGN_EC_HASH, &signature, bytes((uint8_t*) message, strlen(message)), bytes(account, 20)))
+  TRY(req_require_signature(ctx, SIGN_EC_PREFIX, &signature, bytes((uint8_t*) message, strlen(message)), bytes(account, 20)))
   if (signature.len == 65 && signature.data[64] < 2)
     signature.data[64] += 27;
   zkcrypto_pk_from_seed(signature, conf->sync_key);
